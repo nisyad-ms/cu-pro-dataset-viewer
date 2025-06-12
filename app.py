@@ -1,3 +1,5 @@
+import threading
+import time
 from urllib.parse import urlparse
 
 from azure.identity import DefaultAzureCredential
@@ -16,6 +18,17 @@ templates = Jinja2Templates(directory="templates")
 # Azure Blob Storage config
 AZURE_BLOB_URL = "https://irisdatasets.blob.core.windows.net/datasets/content_understanding/processed_data_for_evaluation_pipeline/"
 
+# Simple in-memory cache for dataset list and details
+CACHE = {
+    "datasets": {"value": None, "ts": 0},
+    "details": {},  # key: dataset_name, value: {"value": ..., "ts": ...}
+}
+CACHE_LOCK = threading.Lock()
+CACHE_TTL = 2 * 60 * 60  # 2 hours in seconds
+
+# Background thread to prefetch and cache all dataset details
+PREFETCH_INTERVAL = 300  # seconds (5 minutes)
+
 
 # Helper to get container and prefix from URL
 def parse_blob_url(blob_url):
@@ -30,11 +43,14 @@ def parse_blob_url(blob_url):
 
 # List datasets in Azure Blob Storage
 def list_azure_datasets():
+    now = time.time()
+    with CACHE_LOCK:
+        if CACHE["datasets"]["value"] is not None and now - CACHE["datasets"]["ts"] < CACHE_TTL:
+            return CACHE["datasets"]["value"]
     account_url, container, prefix = parse_blob_url(AZURE_BLOB_URL)
     credential = DefaultAzureCredential()
     service_client = BlobServiceClient(account_url, credential=credential)
     container_client = service_client.get_container_client(container)
-    # List folders (datasets) under prefix
     dataset_names = set()
     blobs = container_client.walk_blobs(name_starts_with=prefix, delimiter="/")
     for blob in blobs:
@@ -44,7 +60,33 @@ def list_azure_datasets():
             if rel:
                 dataset = rel.split("/", 1)[0]
                 dataset_names.add(dataset)
-    return sorted(dataset_names)
+    result = sorted(dataset_names)
+    with CACHE_LOCK:
+        CACHE["datasets"] = {"value": result, "ts": now}
+    return result
+
+
+# Background prefetching of all dataset details
+def prefetch_all_dataset_details():
+    while True:
+        try:
+            datasets = list_azure_datasets()
+            for dataset_name in datasets:
+                # Prefetch and cache details
+                try:
+                    api_dataset_detail(dataset_name)
+                except Exception:
+                    pass  # Optionally log error
+        except Exception:
+            pass  # Optionally log error
+        time.sleep(PREFETCH_INTERVAL)
+
+
+# Start background prefetch thread on app startup
+@app.on_event("startup")
+def start_prefetch_thread():
+    t = threading.Thread(target=prefetch_all_dataset_details, daemon=True)
+    t.start()
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -61,6 +103,11 @@ def api_list_datasets():
 
 @app.get("/api/datasets/{dataset_name}")
 def api_dataset_detail(dataset_name: str):
+    now = time.time()
+    with CACHE_LOCK:
+        cached = CACHE["details"].get(dataset_name)
+        if cached and now - cached["ts"] < CACHE_TTL:
+            return JSONResponse(cached["value"])
     account_url, container, prefix = parse_blob_url(AZURE_BLOB_URL)
     credential = DefaultAzureCredential()
     service_client = BlobServiceClient(account_url, credential=credential)
@@ -86,7 +133,11 @@ def api_dataset_detail(dataset_name: str):
             import json
             results.append(
                 {"name": b.name[len(dataset_prefix):], "content": json.loads(content)})
-    return JSONResponse({"pdfs": pdfs, "kb_pdfs": kb_pdfs, "analyzer": analyzer, "results": results})
+    result = {"pdfs": pdfs, "kb_pdfs": kb_pdfs,
+              "analyzer": analyzer, "results": results}
+    with CACHE_LOCK:
+        CACHE["details"][dataset_name] = {"value": result, "ts": now}
+    return JSONResponse(result)
 
 
 @app.get("/pdf/{dataset_name}/{pdf_type}/{pdf_name}")
