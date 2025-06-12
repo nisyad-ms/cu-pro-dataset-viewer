@@ -1,7 +1,7 @@
 [project]
-name = "cu-pro-benchmark-v2"
+name = "cu-pro-benchmark-viewer"
 version = "0.1.0"
-description = "Add your description here"
+description = "UI to visualize and compare benchmark results from the CU Pro Benchmark."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
