@@ -6,56 +6,218 @@
     <style>
         body {
             font-family: Arial, sans-serif;
-            max-width: 700px;
-            margin: 2em auto;
+            margin: 0;
             background: #fafbfc;
             color: #222;
         }
 
-        h1 {
-            margin-bottom: 1em;
+        .container {
+            display: flex;
+            height: 100vh;
         }
 
-        ul {
-            padding-left: 1.2em;
+        .sidebar {
+            min-width: 260px;
+            max-width: 420px;
+            width: max-content;
+            background: #f4f4f4;
+            border-right: 1px solid #e0e0e0;
+            padding: 1.5em 1em 1em 1.5em;
+            box-sizing: border-box;
+            overflow-y: auto;
+            white-space: nowrap;
         }
 
-        li {
-            margin-bottom: 0.5em;
+        .sidebar h2 {
+            margin-top: 0;
         }
 
-        a {
+        .sidebar ul {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .sidebar li {
+            margin-bottom: 0.7em;
+            word-break: break-all;
+        }
+
+        .sidebar a {
             color: #1565c0;
             text-decoration: none;
             font-weight: 500;
+            cursor: pointer;
         }
 
-        a:hover {
-            text-decoration: underline;
+        .sidebar a.active {
+            font-weight: bold;
+            color: #0d47a1;
         }
 
-        .dataset-list {
+        .main {
+            flex: 1;
+            padding: 2em 2em 2em 2em;
+            overflow-y: auto;
+        }
+
+        .section {
             background: #fff;
             border-radius: 6px;
             box-shadow: 0 1px 4px #0001;
             padding: 1em 1.5em;
+            margin-bottom: 2em;
+        }
+
+        pre {
+            background: #f4f4f4;
+            padding: 1em;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-size: 0.97em;
+        }
+
+        .pdf-viewer {
+            width: 100%;
+            height: 600px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            margin-top: 0.5em;
+        }
+
+        .pdf-link {
+            cursor: pointer;
+            color: #1565c0;
+            text-decoration: underline;
+            font-weight: 500;
+            transition: background 0.2s, color 0.2s;
+            padding: 2px 4px;
+            border-radius: 3px;
+        }
+
+        .pdf-link.selected {
+            background: #e3f2fd;
+            color: #0d47a1;
         }
     </style>
 </head>
 
 <body>
-    <h1>Available Datasets</h1>
-    <div class="dataset-list">
-        <ul>
-            {% for ds in datasets %}
-            {% if azure %}
-            <li><a href="/azure-datasets/{{ ds }}">{{ ds }}</a></li>
-            {% else %}
-            <li><a href="/dataset/{{ ds }}">{{ ds }}</a></li>
-            {% endif %}
-            {% endfor %}
-        </ul>
+    <div class="container">
+        <div class="sidebar">
+            <h2>Datasets</h2>
+            <ul id="dataset-list">
+                <!-- Datasets will be loaded here -->
+            </ul>
+        </div>
+        <div class="main" id="main-content">
+            <p>Select a dataset to view its details.</p>
+        </div>
     </div>
+    <script>
+        // Load dataset list
+        async function loadDatasets() {
+            const resp = await fetch('/api/datasets');
+            const data = await resp.json();
+            const ul = document.getElementById('dataset-list');
+            ul.innerHTML = '';
+            data.datasets.forEach(ds => {
+                const li = document.createElement('li');
+                const a = document.createElement('a');
+                a.textContent = ds;
+                a.onclick = () => selectDataset(ds, a);
+                a.href = '#';
+                li.appendChild(a);
+                ul.appendChild(li);
+            });
+        }
+
+        // Load dataset details
+        async function selectDataset(ds, linkElem) {
+            document.querySelectorAll('.sidebar a').forEach(a => a.classList.remove('active'));
+            linkElem.classList.add('active');
+            const resp = await fetch(`/api/datasets/${ds}`);
+            const data = await resp.json();
+            renderDataset(data, ds);
+        }
+
+        // Render dataset details
+        function renderDataset(data, ds) {
+            let html = '';
+            html += `<h1>Dataset: ${ds}</h1>`;
+            // PDFs
+            html += '<div class="section"><h2>Input PDFs</h2>';
+            if (data.pdfs && data.pdfs.length) {
+                html += '<ul id="input-pdf-list">';
+                data.pdfs.forEach(pdf => {
+                    html += `<li><a class='pdf-link' id='input-pdf-${pdf.replace(/[^a-zA-Z0-9]/g, "_")}' onclick="viewPDF('${ds}','input_files','${pdf}','input-pdf-list')">${pdf}</a></li>`;
+                });
+                html += '</ul>';
+                html += '<div id="input-pdf-container"></div>';
+            } else {
+                html += '<p>No PDF files found.</p>';
+            }
+            html += '</div>';
+            html += '<div class="section"><h2>Knowledge Base PDFs</h2>';
+            if (data.kb_pdfs && data.kb_pdfs.length) {
+                html += '<ul id="kb-pdf-list">';
+                data.kb_pdfs.forEach(pdf => {
+                    html += `<li><a class='pdf-link' id='kb-pdf-${pdf.replace(/[^a-zA-Z0-9]/g, "_")}' onclick="viewPDF('${ds}','knowledge_base_files','${pdf}','kb-pdf-list')">${pdf}</a></li>`;
+                });
+                html += '</ul>';
+                html += '<div id="kb-pdf-container"></div>';
+            } else {
+                html += '<p>No knowledge base PDF files found.</p>';
+            }
+            html += '</div>';
+            // Analyzer
+            html += '<div class="section"><h2>Analyzer (analyzer.json)</h2>';
+            if (data.analyzer) {
+                html += `<pre>${JSON.stringify(data.analyzer, null, 2)}</pre>`;
+            } else {
+                html += '<p>No analyzer.json found.</p>';
+            }
+            html += '</div>';
+            // Results
+            html += '<div class="section"><h2>Results (*.result.json)</h2>';
+            if (data.results && data.results.length) {
+                data.results.forEach(res => {
+                    html += `<h3>${res.name}</h3><pre>${JSON.stringify(res.content, null, 2)}</pre>`;
+                });
+            } else {
+                html += '<p>No result files found.</p>';
+            }
+            html += '</div>';
+            document.getElementById('main-content').innerHTML = html;
+        }
+
+        // View PDF in embedded viewer just below the list, with close button
+        window.viewPDF = function (ds, type, pdf, listId) {
+            document.querySelectorAll('.pdf-link').forEach(a => a.classList.remove('selected'));
+            let safeId = (type === 'input_files' ? 'input-pdf-' : 'kb-pdf-') + pdf.replace(/[^a-zA-Z0-9]/g, "_");
+            let link = document.getElementById(safeId);
+            if (link) link.classList.add('selected');
+            const url = `/pdf/${ds}/${type}/${pdf}`;
+            const containerId = (type === 'input_files') ? 'input-pdf-container' : 'kb-pdf-container';
+            const container = document.getElementById(containerId);
+            container.innerHTML = `
+                <div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5em;'>
+                    <span style='font-weight:500;'>${pdf}</span>
+                    <button onclick="window.closePDF('${containerId}')" style='background:#eee;border:none;padding:4px 10px;border-radius:3px;cursor:pointer;font-size:1em;'>Close</button>
+                </div>
+                <iframe class='pdf-viewer' src='${url}'></iframe>
+            `;
+            container.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+        // Close PDF viewer
+        window.closePDF = function (containerId) {
+            document.getElementById(containerId).innerHTML = '';
+            document.querySelectorAll('.pdf-link').forEach(a => a.classList.remove('selected'));
+        }
+
+        // Initial load
+        loadDatasets();
+    </script>
 </body>
 
 </html>
