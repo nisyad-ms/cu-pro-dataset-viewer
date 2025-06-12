@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+*.pyo
+*.pyd
+*.pdb
+*.sqlite3
+*.db
+*.log
+*.pot
+*.mo
+*.env
+.env
+.venv
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# VSCode
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints
+
+# Test, coverage, and CI
+.coverage
+.tox/
+.nox/
+.pytest_cache/
+
+# Lock files
+Pipfile.lock
+poetry.lock
+uv.lock
+
+# Datasets (do not commit heavy data)
+datasets/
